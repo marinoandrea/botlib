@@ -98,12 +98,214 @@ command line option.
 
 ## Telegram APIs
 
+The library provides a few functions to interact with Telegram. Most of the times you will just use `botSendMessage()` to reply, but here is the full set:
+
+**Sending messages:**
+
+```c
+// Send a message. Set reply_to to 0 for a standalone message,
+// or to a message ID to reply to that specific message.
+int botSendMessage(int64_t target, sds text, int64_t reply_to);
+
+// Same as above, but returns the chat_id and message_id of the sent message.
+// Useful if you want to edit the message later.
+int botSendMessageAndGetInfo(int64_t target, sds text, int64_t reply_to,
+                             int64_t *chat_id, int64_t *message_id);
+
+// Edit a message you previously sent.
+int botEditMessageText(int64_t chat_id, int message_id, sds text);
+
+// Send an image file.
+int botSendImage(int64_t target, char *filename);
+```
+
+**Handling files:** Users can send voice messages, audio files, or documents to your bot. The `BotRequest` structure tells you what was received:
+
+```c
+// Check br->file_type to see if a file was attached:
+#define TB_FILE_TYPE_NONE 0       // No file
+#define TB_FILE_TYPE_VOICE_OGG 1  // Voice message (OGG format)
+#define TB_FILE_TYPE_AUDIO 2      // Audio file (MP3, etc.)
+#define TB_FILE_TYPE_DOCUMENT 3   // Generic document
+
+// If file_type is not NONE, these fields are populated:
+br->file_id    // Telegram's file ID (used to download)
+br->file_size  // Size in bytes
+br->file_name  // Original filename (audio/document only, may be NULL)
+br->file_mime  // MIME type (audio/document only, may be NULL)
+```
+
+To download a file, use `botGetFile()`:
+
+```c
+if (br->file_type == TB_FILE_TYPE_VOICE_OGG) {
+    // Download to a file named "voice.ogg"
+    if (botGetFile(br, "voice.ogg")) {
+        // File downloaded successfully, do something with it
+    }
+}
+```
+
+**The BotRequest structure:** Your callback receives all the information about the incoming message:
+
+```c
+typedef struct BotRequest {
+    int type;           // TB_TYPE_PRIVATE, TB_TYPE_GROUP, TB_TYPE_SUPERGROUP, TB_TYPE_CHANNEL
+    sds request;        // The message text
+    int64_t from;       // User ID of the sender
+    sds from_username;  // Username of the sender
+    int64_t target;     // Chat ID where to reply
+    int64_t msg_id;     // Message ID (use for replies)
+    sds *argv;          // Message split into words
+    int argc;           // Number of words
+    int file_type;      // TB_FILE_TYPE_* (see above)
+    sds file_id;        // Telegram file ID
+    sds file_name;      // Original filename (if available)
+    sds file_mime;      // MIME type (if available)
+    int64_t file_size;  // File size in bytes
+    int bot_mentioned;  // True if @botname was in the message
+    sds *mentions;      // Array of @mentions in the message
+    int num_mentions;   // Number of mentions
+} BotRequest;
+```
+
+**Low-level API:** If you need to call Telegram API methods not wrapped by this library, you can use:
+
+```c
+sds makeGETBotRequest(const char *action, int *resptr, char **optlist, int numopt);
+```
+
+Where `optlist` is an array of strings alternating parameter names and values, and `numopt` is the number of parameters. The function returns the JSON response as an SDS string.
+
 ## Sqlite wrapper API
+
+The library wraps SQLite with a simpler interface. Queries use special placeholders that handle escaping and type conversion automatically:
+
+* `?s` - TEXT field (pass a `char*`)
+* `?b` - BLOB field (pass a `char*` followed by `size_t` length)
+* `?i` - INTEGER field (pass an `int64_t`)
+* `?d` - REAL field (pass a `double`)
+
+**Running queries:**
+
+```c
+// INSERT: returns the last inserted row ID, or 0 on error
+int64_t id = sqlInsert(dbhandle, "INSERT INTO users VALUES(?i,?s)", user_id, username);
+
+// UPDATE/DELETE: returns 1 on success, 0 on error
+int ok = sqlQuery(dbhandle, "UPDATE users SET name=?s WHERE id=?i", new_name, user_id);
+
+// SELECT returning multiple rows:
+sqlRow row;
+sqlSelect(dbhandle, &row, "SELECT id,name FROM users WHERE active=?i", 1);
+while (sqlNextRow(&row)) {
+    int64_t id = row.col[0].i;      // Integer column
+    const char *name = row.col[1].s; // String column
+    printf("User %lld: %s\n", id, name);
+}
+// Note: sqlNextRow() automatically cleans up when rows are exhausted.
+// If you break early, call sqlEnd(&row) to free resources.
+
+// SELECT returning a single row:
+sqlRow row;
+if (sqlSelectOneRow(dbhandle, &row, "SELECT name FROM users WHERE id=?i", user_id) == SQLITE_ROW) {
+    printf("Name: %s\n", row.col[0].s);
+}
+sqlEnd(&row);
+
+// SELECT returning a single integer:
+int64_t count = sqlSelectInt(dbhandle, "SELECT COUNT(*) FROM users");
+```
+
+**Key-value store:** The library also provides a simple key-value API on top of SQLite. To use it, include `TB_CREATE_KV_STORE` in your database creation query when calling `startBot()`:
+
+```c
+// Set a key (expire=0 means no expiration, otherwise seconds from now)
+kvSet(dbhandle, "mykey", "myvalue", 0);        // No expiration
+kvSet(dbhandle, "tempkey", "tempvalue", 3600); // Expires in 1 hour
+
+// Set with explicit length (for binary data)
+kvSetLen(dbhandle, "binkey", data, datalen, 0);
+
+// Get a key (returns NULL if not found or expired)
+sds value = kvGet(dbhandle, "mykey");
+if (value) {
+    // Use value...
+    sdsfree(value);
+}
+
+// Delete a key
+kvDel(dbhandle, "mykey");
+```
 
 ## JSON wrapper API
 
+The library includes cJSON for JSON parsing, plus a convenience function `cJSON_Select()` that makes extracting nested values much simpler:
+
+```c
+cJSON *json = cJSON_Parse(json_string);
+
+// Select nested fields with a path. The ":s", ":n", etc. suffix
+// checks the type and returns NULL if it doesn't match.
+cJSON *name = cJSON_Select(json, ".user.profile.name:s");  // String
+cJSON *age = cJSON_Select(json, ".user.profile.age:n");    // Number
+cJSON *tags = cJSON_Select(json, ".user.tags:a");          // Array
+cJSON *meta = cJSON_Select(json, ".user.meta:o");          // Object
+
+// Access array elements:
+cJSON *first = cJSON_Select(json, ".items[0].name:s");
+cJSON *third = cJSON_Select(json, ".items[2]:o");
+
+// Use * to pass indices or field names as arguments:
+int idx = 5;
+cJSON *item = cJSON_Select(json, ".items[*].name:s", idx);
+
+char *field = "email";
+cJSON *email = cJSON_Select(json, ".user.*:s", field);
+
+// Type specifiers:
+// :s = string, :n = number, :a = array, :o = object, :b = boolean, :! = null
+
+// After selecting, access values:
+if (name) printf("Name: %s\n", name->valuestring);
+if (age) printf("Age: %d\n", (int)age->valuedouble);
+
+// Don't forget to free:
+cJSON_Delete(json);
+```
+
 ## SDS strings
 
-... Work in progress ...
+SDS (Simple Dynamic Strings) is a string library that makes C string handling much safer and more convenient. SDS strings are binary-safe, know their length, and automatically manage memory. The full documentation is at https://github.com/antirez/sds but here are the most common operations:
 
-For the bot API check `mybot.c` example itself. The basic usage is pretty simple. However for all the other stuff, like the Sqlite3 abstractions, they are taken from [Stonky](https://github.com/antirez/stonky), so the code there (which is very accessible) will provide some help. I hope to document this project better. For now my main goal was to stop duplicating Stonly to create new bots with all the common code inside.
+```c
+// Create strings
+sds s = sdsempty();              // Empty string
+sds s = sdsnew("Hello");         // From C string
+sds s = sdsnewlen(buf, len);     // From buffer with length
+sds s = sdsfromlonglong(12345);  // From integer
+
+// Concatenate (these may reallocate, so always use the return value)
+s = sdscat(s, " World");         // Append C string
+s = sdscatlen(s, buf, len);      // Append buffer
+s = sdscatprintf(s, " %d", 42);  // Append formatted
+
+// Length and access
+size_t len = sdslen(s);          // Get length (O(1), no strlen!)
+s[0] = 'h';                      // Direct character access is fine
+
+// Modify
+s = sdstrim(s, " \t\n");         // Trim characters from both ends
+sdsrange(s, 0, 4);               // Keep only characters 0-4
+
+// Split
+int count;
+sds *tokens = sdssplitargs("hello world", &count);
+// Use tokens[0], tokens[1], etc.
+sdsfreesplitres(tokens, count);  // Free the array and all strings
+
+// Free
+sdsfree(s);
+```
+
+The key thing to remember: SDS strings are compatible with C strings for reading (you can pass them to `printf`, `strcmp`, etc.) but you must use SDS functions to modify them, and always use the return value since the pointer may change on reallocation.
