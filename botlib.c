@@ -749,7 +749,7 @@ int64_t botProcessUpdates(int64_t offset, int timeout) {
         cJSON *voice = cJSON_Select(msg,".voice.file_id:s");
         if (voice) {
             br->file_type = TB_FILE_TYPE_VOICE_OGG;
-            br->file_id = voice->valuestring;
+            br->file_id = sdsnew(voice->valuestring);
             cJSON *size = cJSON_Select(msg,".voice.file_size:n");
             br->file_size = size ? size->valuedouble : 0;
         }
