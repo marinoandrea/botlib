@@ -28,6 +28,8 @@ typedef struct BotRequest {
     int file_type;      /* TB_FILE_TYPE_* */
     sds file_id;        /* File ID if a file is present in the message.
                          * The file format will be given by file_type. */
+    sds file_name;      /* Original file name, if available. */
+    sds file_mime;      /* MIME type, if available. */
     int64_t file_size;  /* Size of the file. */
     int bot_mentioned;  /* True if the bot was explicitly mentioned. */
     sds *mentions;      /* List of mentioned usernames. NULL if there
@@ -50,7 +52,8 @@ typedef void (*TBCronCallback)(sqlite3 *dbhandle);
 
 #define TB_FILE_TYPE_NONE 0
 #define TB_FILE_TYPE_VOICE_OGG 1
-/* ... More ar missing ... */
+#define TB_FILE_TYPE_AUDIO 2
+#define TB_FILE_TYPE_DOCUMENT 3
 
 /* Concatenate this when starting the bot and passing your create
  * DB query for Sqlite database initialization. */

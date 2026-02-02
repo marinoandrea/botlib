@@ -562,6 +562,8 @@ void freeBotRequest(BotRequest *br) {
     sdsfreesplitres(br->argv,br->argc);
     sdsfree(br->request);
     sdsfree(br->file_id);
+    sdsfree(br->file_name);
+    sdsfree(br->file_mime);
     sdsfree(br->from_username);
     if (br->mentions) {
         for (int j = 0; j < br->num_mentions; j++) sdsfree(br->mentions[j]);
@@ -581,6 +583,8 @@ BotRequest *createBotRequest(void) {
     br->target = 0;
     br->msg_id = 0;
     br->file_id = NULL;
+    br->file_name = NULL;
+    br->file_mime = NULL;
     br->file_size = 0;
     br->type = TB_TYPE_UNKNOWN;
     br->file_type = TB_FILE_TYPE_NONE;
@@ -745,13 +749,37 @@ int64_t botProcessUpdates(int64_t offset, int timeout) {
         br->request = request;
         br->from_username = sdsnew(from_username);
 
-        /* Check for files. */
+        /* Check for files: voice, audio, or document. */
         cJSON *voice = cJSON_Select(msg,".voice.file_id:s");
         if (voice) {
             br->file_type = TB_FILE_TYPE_VOICE_OGG;
             br->file_id = sdsnew(voice->valuestring);
             cJSON *size = cJSON_Select(msg,".voice.file_size:n");
             br->file_size = size ? size->valuedouble : 0;
+        }
+
+        cJSON *audio = cJSON_Select(msg,".audio.file_id:s");
+        if (audio && br->file_type == TB_FILE_TYPE_NONE) {
+            br->file_type = TB_FILE_TYPE_AUDIO;
+            br->file_id = sdsnew(audio->valuestring);
+            cJSON *size = cJSON_Select(msg,".audio.file_size:n");
+            cJSON *mime = cJSON_Select(msg,".audio.mime_type:s");
+            cJSON *name = cJSON_Select(msg,".audio.file_name:s");
+            br->file_size = size ? size->valuedouble : 0;
+            br->file_mime = mime ? sdsnew(mime->valuestring) : NULL;
+            br->file_name = name ? sdsnew(name->valuestring) : NULL;
+        }
+
+        cJSON *doc = cJSON_Select(msg,".document.file_id:s");
+        if (doc && br->file_type == TB_FILE_TYPE_NONE) {
+            br->file_type = TB_FILE_TYPE_DOCUMENT;
+            br->file_id = sdsnew(doc->valuestring);
+            cJSON *size = cJSON_Select(msg,".document.file_size:n");
+            cJSON *mime = cJSON_Select(msg,".document.mime_type:s");
+            cJSON *name = cJSON_Select(msg,".document.file_name:s");
+            br->file_size = size ? size->valuedouble : 0;
+            br->file_mime = mime ? sdsnew(mime->valuestring) : NULL;
+            br->file_name = name ? sdsnew(name->valuestring) : NULL;
         }
 
         /* Parse entities, filling the mentions array. */
