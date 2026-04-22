@@ -749,7 +749,7 @@ int64_t botProcessUpdates(int64_t offset, int timeout) {
         br->request = request;
         br->from_username = sdsnew(from_username);
 
-        /* Check for files: voice, audio, or document. */
+        /* Check for files: voice, audio, video, or document. */
         cJSON *voice = cJSON_Select(msg,".voice.file_id:s");
         if (voice) {
             br->file_type = TB_FILE_TYPE_VOICE_OGG;
@@ -765,6 +765,18 @@ int64_t botProcessUpdates(int64_t offset, int timeout) {
             cJSON *size = cJSON_Select(msg,".audio.file_size:n");
             cJSON *mime = cJSON_Select(msg,".audio.mime_type:s");
             cJSON *name = cJSON_Select(msg,".audio.file_name:s");
+            br->file_size = size ? size->valuedouble : 0;
+            br->file_mime = mime ? sdsnew(mime->valuestring) : NULL;
+            br->file_name = name ? sdsnew(name->valuestring) : NULL;
+        }
+
+        cJSON *video = cJSON_Select(msg,".video.file_id:s");
+        if (video && br->file_type == TB_FILE_TYPE_NONE) {
+            br->file_type = TB_FILE_TYPE_VIDEO;
+            br->file_id = sdsnew(video->valuestring);
+            cJSON *size = cJSON_Select(msg,".video.file_size:n");
+            cJSON *mime = cJSON_Select(msg,".video.mime_type:s");
+            cJSON *name = cJSON_Select(msg,".video.file_name:s");
             br->file_size = size ? size->valuedouble : 0;
             br->file_mime = mime ? sdsnew(mime->valuestring) : NULL;
             br->file_name = name ? sdsnew(name->valuestring) : NULL;

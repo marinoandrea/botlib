@@ -54,6 +54,7 @@ typedef void (*TBCronCallback)(sqlite3 *dbhandle);
 #define TB_FILE_TYPE_VOICE_OGG 1
 #define TB_FILE_TYPE_AUDIO 2
 #define TB_FILE_TYPE_DOCUMENT 3
+#define TB_FILE_TYPE_VIDEO 4
 
 /* Concatenate this when starting the bot and passing your create
  * DB query for Sqlite database initialization. */
